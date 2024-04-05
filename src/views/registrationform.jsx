@@ -79,7 +79,7 @@ const RegistrationForm = () => {
             fd.append('email', formData.email);
             fd.append('password', formData.password);
 
-            axios.post('http://34.224.3.50:5000/register', fd)
+            axios.post('http://0.0.0.0:5000/register', fd)
                 .then(response => {
                     // Handle successful response
                     console.log(response.data);
@@ -100,7 +100,7 @@ const RegistrationForm = () => {
             console.log("ffffffddd", fd);
             fd.append('username', formData.username);
             fd.append('password', formData.password);
-            axios.post('http://34.224.3.50:5000/login', fd)
+            axios.post('http://0.0.0.0:5000/login', fd)
                 .then(response => {
                     // Handle successful response
                     console.log(response.data);
