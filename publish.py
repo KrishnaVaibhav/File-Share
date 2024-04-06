@@ -13,7 +13,7 @@ dynamodb = boto3.resource("dynamodb", region_name=aws_region)
 s3 = boto3.client("s3", region_name=aws_region)
 
 USER_TABLE = "UserTable"
-S3_BUCKET_NAME = "filesshare"
+S3_BUCKET_NAME = "filesshare-krishna"
 
 with open(file_path, "r") as file:
     file_contents = file.readlines()
