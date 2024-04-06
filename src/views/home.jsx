@@ -1,19 +1,18 @@
-import React , {useState} from 'react';
+import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './home.css';
 import { FileUploader } from "react-drag-drop-files";
-import { useNavigate } from "react-router-dom";
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import axios from 'axios';
 
 const Profile = () => {
     const location = useLocation();
-    const {username, email, password, confirmPassword  } = location.state || {};
+    const { username, email, password, confirmPassword } = location.state || {};
     const fileTypes = ["JPEG", "PNG", "GIF", "PDF", "DOC", "DOCX", "TXT", "CSV", "MP3", "MP4", "ZIP", "RAR"];
     const [file, setFile] = useState(null);
     const handleChange = (file) => {
-      setFile(file);
+        setFile(file);
     };
     const [link, setLink] = useState("");
     const [uploading, setUploading] = useState(false);
@@ -24,10 +23,10 @@ const Profile = () => {
         fd.append("username", username);
         axios.post(process.env.REACT_APP_SERVER_IP + "/subscribe", fd)
             .then(response => {
-            alert(response.data.message);
+                alert(response.data.message);
             })
             .catch(error => {
-            console.error(error);
+                console.error(error);
             });
     };
     const handleSubmit = async () => {
@@ -82,7 +81,7 @@ const Profile = () => {
                     <button
                         className="btn btn-primary copy-button"
                         onClick={() => {
-                            navigator.clipboard.writeText(link ? link : "");
+                            navigator.clipboard.writeText(link ? link : "Not available");
                         }}
                     >
                         <i className="bi bi-copy"></i>
@@ -98,5 +97,5 @@ const Profile = () => {
             </div>
         </div>
     );
-};  
+};
 export default Profile;
