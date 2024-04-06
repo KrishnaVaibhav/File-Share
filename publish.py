@@ -19,6 +19,8 @@ with open(file_path, "r") as file:
     file_contents = file.readlines()
     subscribe = file_contents[0].strip().split("=")[1]
     publish = file_contents[1].strip().split("=")[1]
+    print(subscribe)
+    print(publish)
 
 
 @file_transfer.after_request
