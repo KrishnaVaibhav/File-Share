@@ -22,7 +22,7 @@ const Profile = () => {
     const fd = new FormData();
     const redirect = () => {
         fd.append("username", username);
-        axios.post("http://0.0.0.0:5000/subscribe", fd)
+        axios.post(process.env.REACT_APP_SERVER_IP + "/subscribe", fd)
             .then(response => {
             alert(response.data.message);
             })
@@ -39,7 +39,7 @@ const Profile = () => {
             try {
                 setUploading(true); // Set uploading state to true
 
-                const response = await fetch("http://0.0.0.0:5000/file", {
+                const response = await fetch(process.env.REACT_APP_SERVER_IP + "/file", {
                     method: "POST",
                     body: formData,
                 });
