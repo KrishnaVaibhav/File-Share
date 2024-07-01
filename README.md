@@ -1,5 +1,5 @@
 # CloudFormation For the Application
-
+```
 AWSTemplateFormatVersion: 2010-09-09
 Description: "Cloud formation for File Shsre web application -> Ec2, S3, Lambda, VPC, SNS, SQS, DynamoDB"
 
@@ -386,3 +386,4 @@ Outputs:
   WebsiteURL:
     Description: "URL of the React webapplicaiton"
     Value: !Sub "http://${EC2Instance.PublicDnsName}:3000"
+```
