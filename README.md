@@ -1,70 +1,388 @@
-# Getting Started with Create React App
+# CloudFormation For the Application
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Cloud formation for File Shsre web application -> Ec2, S3, Lambda, VPC, SNS, SQS, DynamoDB"
 
-## Available Scripts
+Resources:
+  FileStorageBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: filesshare-krishna
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldObjects
+            Status: Enabled
+            ExpirationInDays: 1
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: false
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
 
-In the project directory, you can run:
+  FileStorageBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref FileStorageBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+            Resource: !Sub "arn:aws:s3:::${FileStorageBucket}/*"
 
-### `npm start`
+  UserDynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      TableName: UserTable
+      AttributeDefinitions:
+        - AttributeName: user
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+  DataBackupVault:
+    Type: "AWS::Backup::BackupVault"
+    Properties:
+      BackupVaultName: FileShareBackupVault
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+  FileShareBackupPlan:
+    Type: "AWS::Backup::BackupPlan"
+    Properties:
+      BackupPlan:
+        BackupPlanName: FileShareBackupPlan
+        BackupPlanRule:
+          - RuleName: DailyBackup
+            TargetBackupVault: !Ref DataBackupVault
+            ScheduleExpression: cron(0 12 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 10080
+            Lifecycle:
+              DeleteAfterDays: 30
 
-### `npm test`
+  MyBackupSelection:
+    Type: "AWS::Backup::BackupSelection"
+    Properties:
+      BackupPlanId: !Ref FileShareBackupPlan
+      BackupSelection:
+        SelectionName: FileShareSelection
+        IamRoleArn: arn:aws:iam::730335407937:role/LabRole
+        Resources:
+          - !GetAtt UserDynamoDBTable.Arn
+          - !GetAtt FileStorageBucket.Arn
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+  MySSMParameter:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "urlone"
+      Type: "String"
+      Value:
+        Fn::Sub: "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/subscribe-email"
 
-### `npm run build`
+  MySSMParameter2:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "urltwo"
+      Type: "String"
+      Value:
+        Fn::Sub: "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/publish-message"
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+  FileShareVPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: FileShareVPC
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+  PublicSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref FileShareVPC
+      CidrBlock: "10.0.1.0/24"
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: FileshareIG
 
-### `npm run eject`
+  GatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref FileShareVPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref FileShareVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+  PublicRoute:
+    Type: "AWS::EC2::Route"
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+  PublicSubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    DependsOn:
+      - ApiGatewayDeployment
+    Properties:
+      InstanceType: t2.medium
+      KeyName: file-transfer
+      ImageId: ami-080e1f13689e07408
+      SubnetId: !Ref PublicSubnet
+      IamInstanceProfile: LabInstanceProfile
+      SecurityGroupIds:
+        - !GetAtt InstanceSecurityGroup.GroupId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt-get update -y
+          sudo apt install awscli -y
+          cd /home/ubuntu  
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          source ~/.bashrc
+          nvm install 20
+          git clone https://github.com/KrishnaVaibhav/File-Share.git
+          cd File-Share
+          IP=$(curl http://169.254.169.254/latest/meta-data/public-ipv4)
+          echo REACT_APP_SERVER_IP=http://$IP:5000 > .env
+          sudo apt-get install python3-pip -y
+          sudo pip3 install -r requirements.txt
+          API_URL_S=$( aws ssm get-parameter --name "urlone" --query "Parameter.Value" --output text --region us-east-1)
+          API_URL_P=$( aws ssm get-parameter --name "urltwo" --query "Parameter.Value" --output text --region us-east-1)
+          echo "subscribe="$API_URL_S > url.txt
+          echo "publish="$API_URL_P >> url.txt
+          sudo apt-get install npm -y
+          sudo npm install
+          sudo python3 publish.py & sudo npm start
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+  InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable SSH access and HTTP access on the inbound port"
+      VpcId: !Ref FileShareVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "3000"
+          ToPort: "3000"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "5000"
+          ToPort: "5000"
+          CidrIp: 0.0.0.0/0
 
-## Learn More
+  LambdaSubscribeEmailFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.lambda_handler"
+      Role: arn:aws:iam::730335407937:role/LabRole
+      FunctionName: "LambdaSubscribeEmailFunction"
+      Runtime: "python3.8"
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          def lambda_handler(event, context):
+              if isinstance(event.get('body'), str):
+                  try:
+                      event = json.loads(event['body'])
+                  except json.JSONDecodeError:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({'error': 'Invalid JSON format'})
+                      }
+              topic_name = event.get('topic_name')
+              email_address = event.get('email_address')
+              if not topic_name or not email_address:
+                  missing_params = [param for param in ["topic_name", "email_address"] if not event.get(param)]
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': f'Missing required parameter(s): {", ".join(missing_params)}'})
+                  }
+              sns_client = boto3.client('sns')
+              print(topic_name)
+              print(email_address)
+              try:
+                  create_topic_response = sns_client.create_topic(Name=topic_name)
+                  topic_arn = create_topic_response['TopicArn']
+                  subscribe_response = sns_client.subscribe(
+                      TopicArn=topic_arn,
+                      Protocol='email',
+                      Endpoint=email_address
+                  )
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({
+                          'message': f"Subscription request sent to {email_address}.",
+                          'TopicArn': topic_arn,
+                          'SubscriptionArn': subscribe_response['SubscriptionArn']
+                      })
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': f"Error processing request: {str(e)}"})
+                  }
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  LambdaPublishMessageFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.lambda_handler"
+      Role: arn:aws:iam::730335407937:role/LabRole
+      FunctionName: "LambdaPublishMessageFunction"
+      Runtime: "python3.8"
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          def lambda_handler(event, context):
+              if isinstance(event.get("body"), str):
+                  try:
+                      event = json.loads(event["body"])
+                  except json.JSONDecodeError:
+                      return {
+                          "statusCode": 400,
+                          "body": json.dumps({"error": "Invalid JSON format"}),
+                      }
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+              topic_arn = event.get("topic_arn")
+              message = event.get("message")
+              if not topic_arn or not message:
+                  missing_params = [
+                      param for param in ["topic_arn", "message"] if not event.get(param)
+                  ]
+                  return {
+                      "statusCode": 400,
+                      "body": json.dumps(
+                          {"error": f'Missing required parameter(s): {", ".join(missing_params)}'}
+                      ),
+                  }
+              sns_client = boto3.client("sns")
+              print("arn: " + topic_arn)
+              print(message)
+              try:
+                  topic_arn = event["topic_arn"]
+                  message = event["message"]
+                  print(topic_arn)
+                  response = sns_client.publish(TopicArn=topic_arn, Message=message)
+                  return {
+                      "statusCode": 200,
+                      "body": json.dumps("Message sent to the topic subscribers."),
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      "statusCode": 500,
+                      "body": json.dumps(f"Error sending message: {str(e)}"),
+                  }
 
-### Code Splitting
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "LambdaInvocationApi"
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+  SubscribeEmailApiResource:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "subscribe-email"
+      RestApiId: !Ref ApiGatewayRestApi
 
-### Analyzing the Bundle Size
+  PublishMessageApiResource:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "publish-message"
+      RestApiId: !Ref ApiGatewayRestApi
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+  SubscribeEmailMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "POST"
+      ResourceId: !Ref SubscribeEmailApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaSubscribeEmailFunction.Arn}/invocations"
 
-### Making a Progressive Web App
+  PublishMessageMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "POST"
+      ResourceId: !Ref PublishMessageApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaPublishMessageFunction.Arn}/invocations"
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - SubscribeEmailMethod
+      - PublishMessageMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: "prod"
 
-### Advanced Configuration
+  LambdaInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt LambdaSubscribeEmailFunction.Arn
+      Principal: "apigateway.amazonaws.com"
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+  LambdaInvokePermission2:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt LambdaPublishMessageFunction.Arn
+      Principal: "apigateway.amazonaws.com"
 
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Outputs:
+  WebsiteURL:
+    Description: "URL of the React webapplicaiton"
+    Value: !Sub "http://${EC2Instance.PublicDnsName}:3000"
